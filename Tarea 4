@@ -1,0 +1,475 @@
+import abc  # Importamos el módulo para definir Clases Abstractas (ABC).
+import datetime  # Importamos para el manejo de fechas y tiempos en las reservas.
+import logging  # Importamos el módulo nativo para la gestión de archivos de logs (registro de eventos).
+
+# ==========================================
+# CONFIGURACIÓN DEL SISTEMA DE LOGS
+# ==========================================
+# Configuramos el logger para que escriba en 'software_fj.log', capture niveles INFO o superiores,
+# y aplique un formato con fecha, hora, nivel de error y el mensaje correspondiente.
+logging.basicConfig(
+    filename='software_fj.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+)
+
+# ==========================================
+# EXCEPCIONES PERSONALIZADAS (Manejo de Errores)
+# ==========================================
+
+class SoftwareFJException(Exception):
+    """Excepción base para el sistema Software FJ, hereda de la clase nativa Exception."""
+    pass
+
+class ValidacionDatoError(SoftwareFJException):
+    """Se lanza cuando un dato de entrada (como cédula, correo, nombre) no cumple el formato."""
+    pass
+
+class ServicioNoDisponibleError(SoftwareFJException):
+    """Se lanza cuando el servicio solicitado no cumple con las condiciones o parámetros necesarios."""
+    pass
+
+class ReservaInvalidaError(SoftwareFJException):
+    """Se lanza cuando una operación sobre una reserva (creación, cancelación) viola las reglas de negocio."""
+    pass
+
+
+# ==========================================
+# CLASES ABSTRACTAS Y DE ENTIDAD
+# ==========================================
+
+class EntidadSistema(abc.ABC):
+    """Clase abstracta que representa cualquier entidad con un identificador único en el sistema."""
+    
+    def __init__(self, id_entidad: str):
+        # Encapsulamiento del atributo identificador único.
+        self._id_entidad = id_entidad
+
+    @abc.abstractmethod
+    def obtener_detalles(self) -> str:
+        """Método abstracto que obliga a las subclases a retornar su representación en texto."""
+        pass
+
+    @property
+    def id_entidad(self) -> str:
+        """Getter para acceder de forma segura al identificador único."""
+        return self._id_entidad
+
+
+class Cliente(EntidadSistema):
+    """Clase que representa a un cliente de la empresa Software FJ con encapsulación estricta."""
+    
+    def __init__(self, id_cliente: str, nombre: str, correo: str):
+        # Invocamos al constructor de la clase abstracta padre.
+        super().__init__(id_cliente)
+        
+        # Validaciones de inicialización usando los setters encapsulados
+        self.nombre = nombre
+        self.correo = correo
+
+    # --- Getters y Setters con validaciones de negocio ---
+    @property
+    def nombre(self) -> str:
+        return self._nombre
+
+    @nombre.setter
+    def nombre(self, valor: str):
+        # El nombre no puede estar vacío ni contener únicamente espacios en blanco.
+        if not valor or not valor.strip():
+            raise ValidacionDatoError("El nombre del cliente no puede estar vacío.")
+        self._nombre = valor.strip()
+
+    @property
+    def correo(self) -> str:
+        return self._correo
+
+    @correo.setter
+    def correo(self, valor: str):
+        # Validación básica de estructura de correo electrónico.
+        if "@" not in valor or "." not in valor:
+            raise ValidacionDatoError(f"El correo electrónico '{valor}' no tiene un formato válido.")
+        self._correo = valor.strip()
+
+    def obtener_detalles(self) -> str:
+        """Implementación del método abstracto de la clase padre."""
+        return f"Cliente ID: {self.id_entidad} | Nombre: {self._nombre} | Email: {self._correo}"
+
+
+# ==========================================
+# JERARQUÍA DE SERVICIOS (Polimorfismo)
+# ==========================================
+
+class Servicio(abc.ABC):
+    """Clase abstracta que define la estructura obligatoria de cualquier servicio de la empresa."""
+    
+    def __init__(self, id_servicio: str, nombre_servicio: str, costo_base: float):
+        self._id_servicio = id_servicio
+        self._nombre_servicio = nombre_servicio
+        # Validación: el costo base no puede ser negativo.
+        if costo_base < 0:
+            raise ValidacionDatoError("El costo base de un servicio no puede ser negativo.")
+        self._costo_base = costo_base
+
+    @property
+    def id_servicio(self) -> str:
+        return self._id_servicio
+
+    @property
+    def nombre_servicio(self) -> str:
+        return self._nombre_servicio
+
+    @abc.abstractmethod
+    def calcular_costo(self, horas: int, descuento: float = None) -> float:
+        """Método abstracto polimórfico para calcular los costos del servicio."""
+        pass
+
+    @abc.abstractmethod
+    def validar_parametros(self, horas: int) -> bool:
+        """Método abstracto para comprobar que el uso solicitado sea lógico y viable."""
+        pass
+
+
+class ReservaSala(Servicio):
+    """Servicio derivado para el alquiler de salas de juntas o capacitación."""
+    
+    def __init__(self, id_servicio: str, nombre_servicio: str, costo_base: float, capacidad_personas: int):
+        super().__init__(id_servicio, nombre_servicio, costo_base)
+        if capacidad_personas <= 0:
+            raise ValidacionDatoError("La capacidad de la sala debe ser mayor a cero.")
+        self._capacidad_personas = capacidad_personas
+
+    def validar_parametros(self, horas: int) -> bool:
+        # Regla de negocio: las salas se alquilan por un mínimo de 2 horas y un máximo de 12 horas.
+        if horas < 2 or horas > 12:
+            raise ServicioNoDisponibleError(f"Reserva de sala inválida: {horas} horas. Rango permitido: 2-12 hrs.")
+        return True
+
+    def calcular_costo(self, horas: int, descuento: float = None) -> float:
+        """Implementación polimórfica y sobrecarga simulada de costos."""
+        self.validar_parametros(horas)
+        costo_total = self._costo_base * horas
+        
+        # Simulación de sobrecarga: si se envía el parámetro opcional de descuento, se aplica.
+        if descuento is not None:
+            if not (0 <= descuento <= 1):
+                raise ValidacionDatoError("El porcentaje de descuento debe estar entre 0.0 y 1.0.")
+            costo_total -= (costo_total * descuento)
+            
+        return costo_total
+
+
+class AlquilerEquipo(Servicio):
+    """Servicio derivado para el préstamo de hardware y dispositivos tecnológicos."""
+    
+    def __init__(self, id_servicio: str, nombre_servicio: str, costo_base: float, seguro_obligatorio: float):
+        super().__init__(id_servicio, nombre_servicio, costo_base)
+        if seguro_obligatorio < 0:
+            raise ValidacionDatoError("El costo del seguro no puede ser negativo.")
+        self._seguro_obligatorio = seguro_obligatorio
+
+    def validar_parametros(self, horas: int) -> bool:
+        # Regla de negocio: los equipos se alquilan por días completos simulados en horas (mínimo 1 hora, máximo 72).
+        if horas <= 0 or horas > 72:
+            raise ServicioNoDisponibleError(f"Alquiler de equipo inválido: {horas} horas. Rango permitido: 1-72 hrs.")
+        return True
+
+    def calcular_costo(self, horas: int, descuento: float = None) -> float:
+        """Cálculo de costo incluyendo el costo fijo del seguro obligatorio."""
+        self.validar_parametros(horas)
+        costo_total = (self._costo_base * horas) + self._seguro_obligatorio
+        
+        if descuento is not None:
+            if not (0 <= descuento <= 1):
+                raise ValidacionDatoError("El porcentaje de descuento debe estar entre 0.0 y 1.0.")
+            # El descuento solo aplica al valor del alquiler por horas, no al seguro.
+            costo_neto = self._costo_base * horas
+            costo_total = (costo_neto - (costo_neto * descuento)) + self._seguro_obligatorio
+            
+        return costo_total
+
+
+class AsesoriaEspecializada(Servicio):
+    """Servicio derivado para consultorías de software y arquitectura técnica."""
+    
+    def __init__(self, id_servicio: str, nombre_servicio: str, costo_base: float, consultor: str):
+        super().__init__(id_servicio, nombre_servicio, costo_base)
+        if not consultor or not consultor.strip():
+            raise ValidacionDatoError("Debe asignarse un consultor válido a la asesoría.")
+        self._consultor = consultor
+
+    def validar_parametros(self, horas: int) -> bool:
+        # Regla de negocio: Las asesorías tienen un máximo estricto de 5 horas por sesión.
+        if horas <= 0 or horas > 5:
+            raise ServicioNoDisponibleError(f"Asesoría inválida: {horas} horas solicitadas. Máximo permitido: 5 hrs.")
+        return True
+
+    def calcular_costo(self, horas: int, descuento: float = None) -> float:
+        """Cálculo de costo de asesorías aplicando un recargo fijo por impuestos/plataforma del 10%."""
+        self.validar_parametros(horas)
+        impuesto = 0.10  # 10% de recargo regulatorio.
+        costo_base_horas = self._costo_base * horas
+        costo_total = costo_base_horas * (1 + impuesto)
+        
+        if descuento is not None:
+            if not (0 <= descuento <= 1):
+                raise ValidacionDatoError("El porcentaje de descuento debe estar entre 0.0 y 1.0.")
+            # El descuento se netea antes de aplicar el recargo impositivo.
+            costo_total = (costo_base_horas * (1 - descuento)) * (1 + impuesto)
+            
+        return costo_total
+
+
+# ==========================================
+# CLASE DE GESTIÓN DE RESERVAS
+# ==========================================
+
+class Reserva:
+    """Clase que integra Clientes y Servicios para procesar y gestionar transacciones."""
+    
+    def __init__(self, id_reserva: str, cliente: Cliente, servicio: Servicio, duracion_horas: int):
+        self._id_reserva = id_reserva
+        # Verificamos que los objetos pasados pertenezcan a las clases correctas.
+        if not isinstance(cliente, Cliente):
+            raise ValidacionDatoError("Objeto cliente provisto no es una instancia válida.")
+        if not isinstance(servicio, Servicio):
+            raise ValidacionDatoError("Objeto servicio provisto no es una instancia válida.")
+            
+        self._cliente = cliente
+        self._servicio = servicio
+        self._duracion_horas = duracion_horas
+        self._estado = "PENDIENTE"  # Estados: PENDIENTE, CONFIRMADA, CANCELADA.
+        self._costo_final = 0.0
+
+    @property
+    def id_reserva(self) -> str:
+        return self._id_reserva
+
+    @property
+    def estado(self) -> str:
+        return self._estado
+
+    def procesar_reserva(self, descuento: float = None):
+        """Aplica lógica de negocio robusta utilizando bloques avanzados de try/except."""
+        try:
+            # Flujo principal: se intenta validar los parámetros y calcular el costo.
+            logging.info(f"Iniciando procesamiento de la reserva {self._id_reserva}...")
+            self._costo_final = self._servicio.calcular_costo(self._duracion_horas, descuento)
+            
+        except ServicioNoDisponibleError as e:
+            # Manejo específico: el servicio rechazó las horas solicitadas.
+            self._estado = "RECHAZADA"
+            # Encadenamiento de excepciones: lanzamos una nueva excepción explicando el contexto original.
+            raise ReservaInvalidaError(f"No se pudo procesar la reserva {self._id_reserva} debido a la indisponibilidad del servicio.") from e
+            
+        except ValidacionDatoError as e:
+            # Manejo específico: datos inconsistentes como descuentos inválidos.
+            self._estado = "ERROR_DATOS"
+            raise ReservaInvalidaError(f"Error en datos de procesamiento para la reserva {self._id_reserva}.") from e
+            
+        else:
+            # Bloque ELSE: se ejecuta única y exclusivamente si NO ocurrió ninguna excepción en el bloque try.
+            self._estado = "CONFIRMADA"
+            logging.info(f"Reserva {self._id_reserva} CONFIRMADA exitosamente por un valor de ${self._costo_final:.2f}")
+            
+        finally:
+            # Bloque FINALLY: se ejecuta SIEMPRE, garantizando el cierre de operaciones y log de auditoría.
+            logging.info(f"Finalizado el intento de procesamiento del registro {self._id_reserva}. Estado resultante: {self._estado}")
+
+    def cancelar_reserva(self):
+        """Cancela una reserva activa si cumple las condiciones del negocio."""
+        if self._estado == "CANCELADA":
+            raise ReservaInvalidaError(f"La reserva {self._id_reserva} ya se encuentra cancelada.")
+        if self._estado == "RECHAZADA" or self._estado == "ERROR_DATOS":
+            raise ReservaInvalidaError(f"No se puede cancelar una reserva que no fue confirmada previamente. Estado: {self._estado}")
+        
+        self._estado = "CANCELADA"
+        logging.info(f"La reserva {self._id_reserva} ha sido cancelada por el cliente.")
+
+
+# ==========================================
+# MOTOR DE SIMULACIÓN (10 OPERACIONES DE PRUEBA)
+# ==========================================
+
+def ejecutar_simulacion():
+    """Ejecuta un set de 10 pruebas combinando escenarios exitosos y fallas catastróficas."""
+    print("=== INICIANDO SIMULACIÓN DE OPERACIONES - SOFTWARE FJ ===\n")
+    logging.info("--- INICIO DE UNA NUEVA SIMULACIÓN DE SISTEMA ---")
+
+    # Estructuras en memoria para simular nuestro almacenamiento persistente de objetos
+    banco_clientes = {}
+    banco_servicios = {}
+    banco_reservas = {}
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 1: Registro de Cliente Válido (Éxito)
+    # -------------------------------------------------------------
+    print("Operación 1: Creando cliente válido...")
+    try:
+        c1 = Cliente("CLI-01", "Carlos Mendoza", "carlos@mail.com")
+        banco_clientes[c1.id_entidad] = c1
+        print(f"[OK] {c1.obtener_detalles()}")
+    except SoftwareFJException as e:
+        logging.error(f"Operación 1 Falló: {e}")
+        print(f"[ERROR] No se pudo crear el cliente: {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 2: Registro de Cliente Inválido - Correo Mal Formado (Fallo Controlado)
+    # -------------------------------------------------------------
+    print("Operación 2: Intentando crear cliente con correo electrónico inválido...")
+    try:
+        # Esto lanzará una excepción ValidacionDatoError debido a que no tiene el formato correcto.
+        c2 = Cliente("CLI-02", "Ana Gómez", "anagomez.com") 
+        banco_clientes[c2.id_entidad] = c2
+        print(f"[OK] {c2.obtener_detalles()}")
+    except SoftwareFJException as e:
+        # Capturamos el error, lo guardamos en el log de archivos y el programa continúa vivo.
+        logging.error(f"Operación 2 Controlada: {e}")
+        print(f"[ERROR CAPTURADO] Falló la validación del cliente de forma segura: {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 3: Registro de Servicio de Sala Válido (Éxito)
+    # -------------------------------------------------------------
+    print("Operación 3: Creando servicio de tipo Reserva de Sala...")
+    try:
+        s1 = ReservaSala("SRV-SALA1", "Sala de Juntas Ejecutiva", costo_base=50.00, capacidad_personas=12)
+        banco_servicios[s1.id_servicio] = s1
+        print(f"[OK] Servicio '{s1.nombre_servicio}' registrado en el catálogo.")
+    except SoftwareFJException as e:
+        logging.error(f"Operación 3 Falló: {e}")
+        print(f"[ERROR] {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 4: Registro de Servicio de Equipo Inválido - Costo Negativo (Fallo Controlado)
+    # -------------------------------------------------------------
+    print("Operación 4: Intentando crear servicio de Alquiler de Equipo con costo negativo...")
+    try:
+        # El negocio prohíbe costos base negativos, por lo que arrojará un error de validación.
+        s2 = AlquilerEquipo("SRV-EQ1", "Servidor Dedicado de Pruebas", costo_base=-10.0, seguro_obligatorio=5.0)
+        banco_servicios[s2.id_servicio] = s2
+        print(f"[OK] Servicio creado: {s2.nombre_servicio}")
+    except SoftwareFJException as e:
+        logging.error(f"Operación 4 Controlada: {e}")
+        print(f"[ERROR CAPTURADO] Validación de parámetros del catálogo activa: {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 5: Creación y Procesamiento de Reserva Válida (Éxito)
+    # -------------------------------------------------------------
+    print("Operación 5: Procesando una reserva correcta de Sala (4 horas) con descuento...")
+    try:
+        cliente_valido = banco_clientes.get("CLI-01")
+        servicio_valido = banco_servicios.get("SRV-SALA1")
+        
+        # Instanciamos la reserva asociando los objetos correspondientes en memoria
+        r1 = Reserva("RES-001", cliente_valido, servicio_valido, duracion_horas=4)
+        # Invocamos el método sobrecargado pasando un 10% de descuento (0.10)
+        r1.procesar_reserva(descuento=0.10)
+        banco_reservas[r1.id_reserva] = r1
+        print(f"[OK] Reserva {r1.id_reserva} procesada. Estado actual: {r1.estado}")
+    except SoftwareFJException as e:
+        logging.error(f"Operación 5 Falló: {e}")
+        print(f"[ERROR] {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 6: Reserva Fallida por Violación de Reglas de Negocio en Horas (Fallo Controlado)
+    # -------------------------------------------------------------
+    print("Operación 6: Intentando reservar una Sala por 20 horas (Límite máximo permitido es 12)...")
+    try:
+        cliente_valido = banco_clientes.get("CLI-01")
+        servicio_sala = banco_servicios.get("SRV-SALA1")
+        
+        # Las 20 horas romperán las políticas internas de la clase ReservaSala
+        r2 = Reserva("RES-002", cliente_valido, servicio_sala, duracion_horas=20)
+        r2.procesar_reserva()
+        banco_reservas[r2.id_reserva] = r2
+    except ReservaInvalidaError as e:
+        logging.error(f"Operación 6 Controlada con encadenamiento: {e}")
+        print(f"[ERROR CAPTURADO] El sistema rechazó la reserva de forma segura: {e}")
+        # Verificamos si existe una excepción original encadenada mediante el atributo __cause__
+        if e.__cause__:
+            print(f"   -> Causa raíz original del servicio: {e.__cause__}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 7: Registro de Servicio Asesoría Especializada Válido (Éxito)
+    # -------------------------------------------------------------
+    print("Operación 7: Añadiendo un servicio de Asesoría Especializada al catálogo...")
+    try:
+        s3 = AsesoriaEspecializada("SRV-ASE1", "Consultoría Arquitectura Cloud", costo_base=150.0, consultor="Ing. Diego Vega")
+        banco_servicios[s3.id_servicio] = s3
+        print(f"[OK] Servicio de Asesoría '{s3.nombre_servicio}' asignado al consultor {s3._consultor}.")
+    except SoftwareFJException as e:
+        logging.error(f"Operación 7 Falló: {e}")
+        print(f"[ERROR] {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 8: Reserva de Asesoría Válida sin Parámetros Sobrecargados (Éxito)
+    # -------------------------------------------------------------
+    print("Operación 8: Procesando reserva de Asesoría por 3 horas (Sin enviar descuento)...")
+    try:
+        cliente_valido = banco_clientes.get("CLI-01")
+        servicio_asesoria = banco_servicios.get("SRV-ASE1")
+        
+        r3 = Reserva("RES-003", cliente_valido, servicio_asesoria, duracion_horas=3)
+        # Al no mandar descuento, el método sobrecargado internamente maneja el flujo estándar
+        r3.procesar_reserva()
+        banco_reservas[r3.id_reserva] = r3
+        print(f"[OK] Reserva de asesoría completada. Estado: {r3.estado}")
+    except SoftwareFJException as e:
+        logging.error(f"Operación 8 Falló: {e}")
+        print(f"[ERROR] {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 9: Intento de Cancelación de Reserva Inexistente o Inválida (Fallo Controlado)
+    # -------------------------------------------------------------
+    print("Operación 9: Intentando cancelar una reserva que fue RECHAZADA previamente (Operación 6)...")
+    try:
+        # Intentaremos cancelar la reserva 'RES-002' que falló en la operación 6.
+        # Las políticas no permiten cancelar algo que nunca fue confirmado.
+        reserva_fallida = banco_reservas.get("RES-002")
+        if not reserva_fallida:
+            # Si no se insertó en el diccionario por el error, simulamos el disparo del control de flujo defensivo.
+            raise ReservaInvalidaError("La reserva 'RES-002' no se encuentra activa en el sistema.")
+        reserva_fallida.cancelar_reserva()
+    except ReservaInvalidaError as e:
+        logging.error(f"Operación 9 Controlada: {e}")
+        print(f"[ERROR CAPTURADO] Regla de negocio de cancelación aplicada correctamente: {e}")
+
+    print("-" * 60)
+
+    # -------------------------------------------------------------
+    # OPERACIÓN 10: Cancelación Exitosa de una Reserva Confirmada (Éxito)
+    # -------------------------------------------------------------
+    print("Operación 10: Solicitando la cancelación válida de la reserva CONFIRMADA (RES-001)...")
+    try:
+        reserva_activa = banco_reservas.get("RES-001")
+        reserva_activa.cancelar_reserva()
+        print(f"[OK] Transacción de cancelación efectuada. Estado final de la reserva: {reserva_activa.estado}")
+    except SoftwareFJException as e:
+        logging.error(f"Operación 10 Falló: {e}")
+        print(f"[ERROR] {e}")
+
+    print("\n" + "=" * 60)
+    print("=== SIMULACIÓN FINALIZADA SIN CAÍDAS DEL SISTEMA ===")
+    print("Consulte el archivo de registro 'software_fj.log' para auditar los errores controlados.")
+    print("=" * 60)
+
+
+# Punto de entrada de la aplicación en Python
+if __name__ == "__main__":
+    # Ejecutamos el hilo principal del programa simulador.
+    ejecutar_simulacion()
